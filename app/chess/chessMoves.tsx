@@ -4,10 +4,10 @@ interface ChessMovesProps {
   history: string[];
   currentMoveIndex?: number;
 }
- 
+
 export function ChessMoves({ history, currentMoveIndex = 0 }: ChessMovesProps) {
     const movePairs: Array<{ white: string; black: string | null; moveNumber: number }> = [];
-    
+
     for (let i = 0; i < history.length; i += 2) {
         movePairs.push({
         moveNumber: Math.floor(i / 2) + 1,

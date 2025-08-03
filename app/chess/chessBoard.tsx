@@ -4,10 +4,10 @@ import { useState, useRef, useEffect, Key } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { ChessMoves } from './chessMoves';
 import { Icon } from './icons';
 import { Textarea } from '@/components/ui/textarea';
+import { StockfishEval } from '@/app/chess/StockfishEval';
 
 
 interface PieceDropHandlerArgs {
@@ -21,32 +21,25 @@ export default function ChessPage(pgn?: string) {
 
     const [fens, setFen] = useState([chessGameRef.current.fen()])
     const [step, setStep] = useState(0);
-    const [chessPosition, setChessPosition] = useState(chessGame.fen());
+    const [pgnstring, setPGN] = useState<string>("");
+    const [evalContainer, setEvalContainer] = useState<HTMLDivElement | null>(null);
 
     useEffect(() => {
-        const game = chessGameRef.current
-
-        if (pgn && typeof pgn === 'string' && pgn.trim() !== '') {
-            game.loadPgn(pgn)
-
-        } else {
-            game.reset()
-        }
+        if (!isValidPGN(pgnstring)) return;
         
-        const list = [new Chess().fen()];
+        chessGame.reset()
 
-        game.history().forEach(move => {
-            game.move(move);
-            list.push(game.fen());
+        if (pgnstring.trim()) chessGame.loadPgn(pgnstring);
+
+        const historyFens = [chessGame.fen()];
+        chessGame.history().forEach(move => {
+            chessGame.move(move);
+            historyFens.push(chessGame.fen());
         });
 
-        setFen(list);
-        setStep(list.length - 1)
-    }, [pgn])
-
-    useEffect(() => {
-        setChessPosition(fens[step])
-    }, [step, fens])
+        setFen(historyFens);
+        setStep(historyFens.length - 1)
+    }, [pgnstring])
 
     useEffect(() => {
         const onKey= (e: KeyboardEvent) => {
@@ -64,6 +57,19 @@ export default function ChessPage(pgn?: string) {
             window.removeEventListener('keydown', onKey);
         }
     }, [fens.length]);
+
+    function isValidPGN(pgn: string): boolean {
+        const chess = new Chess();
+        try {
+            // loadPgn throws an exception if the PGN is syntactically invalid
+            chess.loadPgn(pgn);
+            return true;
+        } catch (e) {
+            // you can inspect `e.message` to see what went wrong
+            console.warn('Invalid PGN:', e);
+            return false;
+        }
+    }
             
     
     function onPieceDrop({
@@ -104,13 +110,17 @@ export default function ChessPage(pgn?: string) {
     }
 
     const chessboardOptions = {
-        position: chessPosition,
+        position: fens[step],
         onPieceDrop,
         id: 'play-vs-random',
     };
 
     return (
         <div className="flex flex-row space-x-10 justify-center">
+
+            {/* stockfish component */}
+            <StockfishEval fen={chessGame.fen()} />
+            
             <div className="flex flex-col items-center">
                 {chessGame.isCheckmate() && (
                     <div className="text-red-500 mt-4 text-lg font-semibold">
@@ -138,10 +148,9 @@ export default function ChessPage(pgn?: string) {
                     <div className="flex spaxe-x-4 justify-center p-4">
                         <Textarea className='w-96 h-32 mr-3'
                         placeholder="PGN string"
-                        value={chessGame.pgn()}
+                        value={pgnstring}
                         onChange={(e) => {
-                            const pgn = e.target.value;
-                            chessGame.loadPgn(pgn);
+                            setPGN(e.target.value);
                         }} />
 
                         <ResetButton 
@@ -163,6 +172,7 @@ export default function ChessPage(pgn?: string) {
         </div>
     )
 }
+
 
 function ResetButton({ onReset }: { onReset: () => void }) {
     
