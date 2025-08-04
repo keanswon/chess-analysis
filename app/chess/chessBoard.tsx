@@ -22,7 +22,6 @@ export default function ChessPage(pgn?: string) {
     const [fens, setFen] = useState([chessGameRef.current.fen()])
     const [step, setStep] = useState(0);
     const [pgnstring, setPGN] = useState<string>("");
-    const [evalContainer, setEvalContainer] = useState<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (!isValidPGN(pgnstring)) return;
@@ -116,11 +115,11 @@ export default function ChessPage(pgn?: string) {
     };
 
     return (
-        <div className="flex flex-row space-x-10 justify-center">
+        <div className="flex flex-row space-x-10 justify-center items-center">
 
             {/* stockfish component */}
             <StockfishEval fen={chessGame.fen()} />
-            
+
             <div className="flex flex-col items-center">
                 {chessGame.isCheckmate() && (
                     <div className="text-red-500 mt-4 text-lg font-semibold">
@@ -144,30 +143,31 @@ export default function ChessPage(pgn?: string) {
                     <Icon   name="smojfarf"
                             rating={2500}
                             isWhite={true}/>
-
-                    <div className="flex spaxe-x-4 justify-center p-4">
-                        <Textarea className='w-96 h-32 mr-3'
-                        placeholder="PGN string"
-                        value={pgnstring}
-                        onChange={(e) => {
-                            setPGN(e.target.value);
-                        }} />
-
-                        <ResetButton 
-                            onReset={() => {
-                            chessGame.reset();
-                            const initialFen = chessGame.fen();
-                            setFen([initialFen]);
-                            setStep(0);
-                        }} />
-                    </div>
                 </div>
             </div>
 
-            <div className="flex-shrink-0 h-96 overflow-y-auto">
+            <div className="flex-shrink-0 overflow-y-auto">
                 <ChessMoves 
                     history={chessGame.history()}
                     currentMoveIndex={chessGame.history().length - 1} />
+
+
+                <div className="flex spaxe-x-4 justify-center p-4">
+                    <Textarea className='w-96 h-32 mr-3'
+                    placeholder="PGN string"
+                    value={pgnstring}
+                    onChange={(e) => {
+                        setPGN(e.target.value);
+                    }} />
+
+                    <ResetButton 
+                        onReset={() => {
+                        chessGame.reset();
+                        const initialFen = chessGame.fen();
+                        setFen([initialFen]);
+                        setStep(0);
+                    }} />
+                </div>
             </div>
         </div>
     )
