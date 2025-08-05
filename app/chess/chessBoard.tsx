@@ -118,7 +118,7 @@ export default function ChessPage(pgn?: string) {
         <div className="flex flex-row space-x-10 justify-center items-center">
 
             {/* stockfish component */}
-            <StockfishEval fen={chessGame.fen()} />
+            <StockfishEval fen={fens[step]} />
 
             <div className="flex flex-col items-center">
                 {chessGame.isCheckmate() && (

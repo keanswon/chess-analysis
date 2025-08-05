@@ -1,4 +1,7 @@
-// components/StockfishEval.tsx
+
+// IMPORTANT: The `fen` prop passed to StockfishEval must always reflect the CURRENT position on the board.
+// The parent component should update the `fen` prop whenever the board changes, so Stockfish evaluates the correct position.
+// If you see Stockfish evaluating an old position, ensure the parent is passing the latest FEN.
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -19,23 +22,27 @@ interface StockfishEvalProps {
   autoEvaluate?: boolean;
   depth?: number;
   className?: string;
+  statusMessage?: string | null;
 }
 
 interface ApiError {
   error: string;
 }
 
-export function StockfishEval({ 
-  fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-  autoEvaluate = true,
-  depth = 18,
-  className = ""
-}: StockfishEvalProps) {
+export function StockfishEval(props: StockfishEvalProps) {
+  const {
+    fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    autoEvaluate = true,
+    depth = 18,
+    className = "",
+    statusMessage = null
+  } = props;
   const [evaluation, setEvaluation] = useState<StockfishEvaluation | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Whenever the FEN changes, re-evaluate the position.
     if (fen && autoEvaluate) {
       evaluatePosition(fen);
     }
@@ -169,8 +176,18 @@ export function StockfishEval({
   }
 
   // Main Evaluation Display
+  // To use the overlay, wrap the board and StockfishEval in a relatively positioned container.
+  // Pass statusMessage (e.g. "Checkmate", "Draw", etc.) as a prop.
   return (
-    <div className={`stockfish-eval ${className}`}>
+    <div className={`stockfish-eval relative ${className}`}>
+      {/* Status Overlay */}
+      {statusMessage && (
+        <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center z-20 pointer-events-none">
+          <div className="bg-black/80 text-white text-2xl font-bold px-8 py-4 rounded-xl shadow-lg border-2 border-white animate-fade-in">
+            {statusMessage}
+          </div>
+        </div>
+      )}
       <div className="bg-gradient-to-br from-gray-600 to-gray-500 rounded-xl p-4 border border-gray-400 shadow-lg min-w-72">
         {/* Header */}
         <div className="flex justify-between items-center mb-3">
