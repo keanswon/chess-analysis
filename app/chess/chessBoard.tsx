@@ -22,13 +22,28 @@ export default function ChessPage(pgn?: string) {
     const [fens, setFen] = useState([chessGameRef.current.fen()])
     const [step, setStep] = useState(0);
     const [pgnstring, setPGN] = useState<string>("");
+    const [whitePlayer, setWhitePlayer] = useState({ name: "", rating: 100 });
+    const [blackPlayer, setBlackPlayer] = useState({ name: "", rating: 100 });
 
     useEffect(() => {
         if (!isValidPGN(pgnstring)) return;
         
         chessGame.reset()
 
-        if (pgnstring.trim()) chessGame.loadPgn(pgnstring);
+        if (pgnstring.trim()) {
+            chessGame.loadPgn(pgnstring);
+            
+            // Extract player information from PGN headers
+            const headers = chessGame.header();
+            setWhitePlayer({
+                name: headers['White'] || "",
+                rating: headers['WhiteElo'] ? parseInt(headers['WhiteElo']) : 0
+            });
+            setBlackPlayer({
+                name: headers['Black'] || "",
+                rating: headers['BlackElo'] ? parseInt(headers['BlackElo']) : 0
+            });
+        }
 
         const historyFens = [chessGame.fen()];
         chessGame.history().forEach(move => {
@@ -134,14 +149,14 @@ export default function ChessPage(pgn?: string) {
                 )}
                 
                 <div className="space-y-4 flex flex-col justify-center">
-                    <Icon   name="smojfarf"
-                            rating={2500}
+                    <Icon   name={blackPlayer.name || "Player"}
+                            rating={blackPlayer.rating}
                             isWhite={false}/>
                     <div className="w-96 h-96">
                         <Chessboard options={chessboardOptions} />
                     </div>
-                    <Icon   name="smojfarf"
-                            rating={2500}
+                    <Icon   name={whitePlayer.name || "Player"}
+                            rating={whitePlayer.rating}
                             isWhite={true}/>
                 </div>
             </div>

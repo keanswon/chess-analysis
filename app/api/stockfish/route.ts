@@ -10,6 +10,7 @@ interface StockfishEvaluation {
   nodes: number;
   time: number;
   nps?: number; // nodes per second
+  fen?: string; // side to move for evaluation perspective
 }
 
 interface EvaluationRequest {
@@ -22,113 +23,143 @@ interface ApiError {
   error: string;
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse<StockfishEvaluation | ApiError>> {
+
+// Streaming Stockfish analysis as it thinks
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body: EvaluationRequest = await request.json();
     const { fen, depth = 18, timeLimit = 10000 } = body;
 
-    const evaluation = await evaluatePosition(fen, depth, timeLimit);
-    return NextResponse.json(evaluation);
-    
+    const stream = new ReadableStream({
+      async start(controller) {
+        await evaluatePositionStream(fen, depth, timeLimit, controller);
+      }
+    });
+
+    return new NextResponse(stream, {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'Transfer-Encoding': 'chunked',
+      },
+    });
   } catch (error) {
     console.error('Stockfish evaluation error:', error);
-    return NextResponse.json({ 
-      error: error instanceof Error ? error.message : 'Evaluation failed' 
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : 'Evaluation failed'
     }, { status: 500 });
   }
 }
 
-function evaluatePosition(fen: string, depth: number, timeLimit: number): Promise<StockfishEvaluation> {
-  return new Promise((resolve, reject) => {
-    // Update this path to your Stockfish binary location
-    const stockfishPath = process.platform === 'darwin' 
-      ? '/opt/homebrew/bin/stockfish'  // macOS with Homebrew
-      : process.platform === 'win32'
-      ? 'stockfish.exe'               // Windows
-      : '/usr/local/bin/stockfish';   // Linux or custom install
-    
-    let stockfish: ChildProcess;
-    
-    try {
-      stockfish = spawn(stockfishPath, [], {
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-    } catch (error) {
-      reject(new Error(`Failed to start Stockfish: ${error}`));
-      return;
+
+// Streaming version: sends each info line as JSON to the client as Stockfish thinks
+async function evaluatePositionStream(
+  fen: string,
+  depth: number,
+  timeLimit: number,
+  controller: ReadableStreamDefaultController
+) {
+  const stockfishPath = process.platform === 'darwin'
+    ? '/opt/homebrew/bin/stockfish'
+    : process.platform === 'win32'
+    ? 'stockfish.exe'
+    : '/usr/local/bin/stockfish';
+
+  let stockfish: ChildProcess;
+  try {
+    stockfish = spawn(stockfishPath, [], {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+  } catch (error) {
+    controller.enqueue(JSON.stringify({ error: `Failed to start Stockfish: ${error}` }) + '\n');
+    controller.close();
+    return;
+  }
+
+  let output = '';
+  let lastDepth = 0;
+  let finished = false;
+  // Always keep the latest info line's evaluation
+  const result: StockfishEvaluation & { fen?: string } = {
+    evaluation: null,
+    bestMove: '',
+    principalVariation: [],
+    depth: 0,
+    nodes: 0,
+    time: 0,
+    fen // add fen to result for perspective correction
+  };
+
+  const timeout = setTimeout(() => {
+    if (!finished) {
+      stockfish.kill('SIGTERM');
+      controller.enqueue(JSON.stringify({ error: 'Stockfish evaluation timeout' }) + '\n');
+      controller.close();
     }
+  }, timeLimit);
 
-    let output = '';
-    const result: StockfishEvaluation = {
-      evaluation: null,
-      bestMove: '',
-      principalVariation: [],
-      depth: depth,
-      nodes: 0,
-      time: 0
-    };
-
-    const timeout = setTimeout(() => {
-      stockfish.kill('SIGTERM');
-      reject(new Error('Stockfish evaluation timeout'));
-    }, timeLimit);
-
-    stockfish.stdout?.on('data', (data: Buffer) => {
-      output += data.toString();
-      const lines = output.split('\n');
-      
-      for (const line of lines) {
-        if (line.startsWith('info') && line.includes('depth')) {
-          parseInfoLine(line, result);
-        }
-        
-        if (line.startsWith('bestmove')) {
-          const match = line.match(/bestmove (\w+)/);
-          if (match) {
-            result.bestMove = match[1];
-          }
-          
-          // Calculate nodes per second
-          if (result.time > 0) {
-            result.nps = Math.round(result.nodes / (result.time / 1000));
-          }
-          
-          clearTimeout(timeout);
-          stockfish.kill('SIGTERM');
-          resolve(result);
-          return;
+  stockfish.stdout?.on('data', (data: Buffer) => {
+    output += data.toString();
+    const lines = output.split('\n');
+    output = lines.pop() || '';
+    for (const line of lines) {
+      if (line.startsWith('info') && line.includes('depth')) {
+        // Always update the result object with the latest info
+        parseInfoLine(line, result);
+        // Only send new depth updates
+        if (result.depth > lastDepth) {
+          lastDepth = result.depth;
+          controller.enqueue(JSON.stringify({ type: 'info', ...result }) + '\n');
         }
       }
-    });
-
-    stockfish.stderr?.on('data', (data: Buffer) => {
-      console.error('Stockfish stderr:', data.toString());
-    });
-
-    stockfish.on('error', (error: Error) => {
-      clearTimeout(timeout);
-      reject(new Error(`Stockfish process error: ${error.message}`));
-    });
-
-    stockfish.on('close', (code: number | null) => {
-      clearTimeout(timeout);
-      if (code !== 0 && code !== null) {
-        reject(new Error(`Stockfish exited with code ${code}`));
+      if (line.startsWith('bestmove')) {
+        const match = line.match(/bestmove (\w+)/);
+        if (match) {
+          result.bestMove = match[1];
+        }
+        if (result.time > 0) {
+          result.nps = Math.round(result.nodes / (result.time / 1000));
+        }
+        finished = true;
+        clearTimeout(timeout);
+        controller.enqueue(JSON.stringify({ type: 'done', ...result }) + '\n');
+        controller.close();
+        stockfish.kill('SIGTERM');
+        return;
       }
-    });
-
-    // Send UCI commands
-    try {
-      stockfish.stdin?.write('uci\n');
-      stockfish.stdin?.write('isready\n');
-      stockfish.stdin?.write(`position fen ${fen}\n`);
-      stockfish.stdin?.write(`go depth ${depth}\n`);
-    } catch (error) {
-      clearTimeout(timeout);
-      stockfish.kill('SIGTERM');
-      reject(new Error('Failed to communicate with Stockfish'));
     }
   });
+
+  stockfish.stderr?.on('data', (data: Buffer) => {
+    console.error('Stockfish stderr:', data.toString());
+  });
+
+  stockfish.on('error', (error: Error) => {
+    clearTimeout(timeout);
+    controller.enqueue(JSON.stringify({ error: `Stockfish process error: ${error.message}` }) + '\n');
+    controller.close();
+  });
+
+  stockfish.on('close', (code: number | null) => {
+    clearTimeout(timeout);
+    if (!finished && code !== 0 && code !== null) {
+      controller.enqueue(JSON.stringify({ error: `Stockfish exited with code ${code}` }) + '\n');
+      controller.close();
+    }
+  });
+
+  // Send UCI commands
+  try {
+    stockfish.stdin?.write('uci\n');
+    stockfish.stdin?.write('isready\n');
+    stockfish.stdin?.write(`position fen ${fen}\n`);
+    stockfish.stdin?.write(`go depth ${depth}\n`);
+  } catch (error) {
+    clearTimeout(timeout);
+    stockfish.kill('SIGTERM');
+    controller.enqueue(JSON.stringify({ error: 'Failed to communicate with Stockfish' }) + '\n');
+    controller.close();
+  }
 }
 
 function parseInfoLine(line: string, result: StockfishEvaluation): void {
@@ -154,7 +185,15 @@ function parseInfoLine(line: string, result: StockfishEvaluation): void {
   if (line.includes('score cp')) {
     const match = line.match(/score cp (-?\d+)/);
     if (match) {
-      result.evaluation = parseInt(match[1], 10) / 100;
+      let evalCp = parseInt(match[1], 10);
+      // Always report from White's perspective
+      if (result.fen) {
+        const sideToMove = result.fen.split(' ')[1];
+        if (sideToMove === 'b') {
+          evalCp = -evalCp;
+        }
+      }
+      result.evaluation = evalCp / 100;
     }
   }
   

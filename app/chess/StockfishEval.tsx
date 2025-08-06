@@ -1,7 +1,4 @@
-
-// IMPORTANT: The `fen` prop passed to StockfishEval must always reflect the CURRENT position on the board.
-// The parent component should update the `fen` prop whenever the board changes, so Stockfish evaluates the correct position.
-// If you see Stockfish evaluating an old position, ensure the parent is passing the latest FEN.
+// ensure parent is passing in the most recent FEN on the board
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -48,10 +45,12 @@ export function StockfishEval(props: StockfishEvalProps) {
     }
   }, [fen, autoEvaluate, depth]);
 
+  // Streaming Stockfish evaluation
   const evaluatePosition = async (fenString: string): Promise<void> => {
     setLoading(true);
     setError(null);
-    
+    setEvaluation(null);
+
     try {
       const response = await fetch('/api/stockfish', {
         method: 'POST',
@@ -61,9 +60,56 @@ export function StockfishEval(props: StockfishEvalProps) {
         body: JSON.stringify({ fen: fenString, depth })
       });
 
-      const data: StockfishEvaluation = await response.json();
+      if (!response.body) throw new Error('No response body');
 
-      setEvaluation(data as StockfishEvaluation);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let doneEval: StockfishEvaluation | null = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const data = JSON.parse(line);
+            if (data.error) {
+              setError(data.error);
+              setLoading(false);
+              return;
+            }
+            if (data.type === 'info') {
+              setEvaluation({
+                evaluation: data.evaluation,
+                bestMove: data.bestMove,
+                principalVariation: data.principalVariation,
+                depth: data.depth,
+                nodes: data.nodes,
+                time: data.time,
+                nps: data.nps,
+              });
+            } else if (data.type === 'done') {
+              doneEval = {
+                evaluation: data.evaluation,
+                bestMove: data.bestMove,
+                principalVariation: data.principalVariation,
+                depth: data.depth,
+                nodes: data.nodes,
+                time: data.time,
+                nps: data.nps,
+              };
+            }
+          } catch (e) {
+            // ignore parse errors
+          }
+        }
+      }
+      if (doneEval) setEvaluation(doneEval);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       setError(errorMessage);
