@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { Chess } from 'chess.js';
+import { Switch } from "@/components/ui/switch";
 
 interface StockfishEvaluation {
   evaluation: number | string | null;
@@ -37,13 +38,14 @@ export function StockfishEval(props: StockfishEvalProps) {
   const [evaluation, setEvaluation] = useState<StockfishEvaluation | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [hideEval, setHideEval] = useState<boolean>(false);
 
   useEffect(() => {
-    // Whenever the FEN changes, re-evaluate the position.
-    if (fen && autoEvaluate) {
+    // Whenever the FEN changes, re-evaluate the position if evaluation is not hidden
+    if (fen && autoEvaluate && !hideEval) {
       evaluatePosition(fen);
     }
-  }, [fen, autoEvaluate, depth]);
+  }, [fen, autoEvaluate, depth, hideEval]);
 
   // Streaming Stockfish evaluation
   const evaluatePosition = async (fenString: string): Promise<void> => {
@@ -248,10 +250,10 @@ export function StockfishEval(props: StockfishEvalProps) {
 
         {/* Evaluation Score */}
         <div className="mb-4">
-          <div className={`text-3xl font-bold mb-1 ${getEvaluationColorClass(evaluation?.evaluation || null)}`}>
-            {formatEvaluation(evaluation?.evaluation || null)}
+          <div className={`text-3xl font-bold mb-1 ${hideEval ? 'text-gray-400' : getEvaluationColorClass(evaluation?.evaluation || null)}`}>
+            {hideEval ? '-.--' : formatEvaluation(evaluation?.evaluation || null)}
           </div>
-          {evaluation && evaluation.time > 0 && (
+          {evaluation && evaluation.time > 0 && !hideEval && (
             <div className="text-black-500 text-xs space-x-2">
               <span>{formatNumber(evaluation.nodes)} nodes</span>
               <span>•</span>
@@ -270,7 +272,7 @@ export function StockfishEval(props: StockfishEvalProps) {
         <div className="bg-gray-800/50 rounded-lg p-3 mb-3">
           <div className="text-gray-400 text-xs font-medium mb-1">BEST MOVE</div>
           <div className="text-white font-mono text-sm">
-            {bestMoveSAN}
+            {hideEval ? '****' : bestMoveSAN}
           </div>
         </div>
 
@@ -278,10 +280,10 @@ export function StockfishEval(props: StockfishEvalProps) {
         <div className="bg-gray-800/50 rounded-lg p-3">
           <div className="text-gray-400 text-xs font-medium mb-1">PRINCIPAL VARIATION</div>
           <div className="text-gray-300 font-mono text-xs leading-relaxed break-all">
-            {evaluation?.principalVariation && evaluation.principalVariation.length > 0 
+            {hideEval ? '****' : (evaluation?.principalVariation && evaluation.principalVariation.length > 0 
               ? evaluation.principalVariation.join(' ')
               : 'N/A'
-            }
+            )}
           </div>
         </div>
 
@@ -295,6 +297,20 @@ export function StockfishEval(props: StockfishEvalProps) {
             {loading ? 'Analyzing...' : 'Analyze Position'}
           </button>
         )}
+      </div>
+
+      {/* Controls Box */}
+      <div className="mt-3 bg-gradient-to-br from-gray-600 to-gray-500 rounded-xl p-4 border border-gray-400 shadow-lg">
+        <div className="flex items-center justify-between">
+          <label htmlFor="eval-bar-toggle" className="text-gray-300 text-sm font-medium">
+            Hide Evaluation
+          </label>
+          <Switch 
+            id="eval-bar-toggle" 
+            checked={hideEval}
+            onCheckedChange={setHideEval}
+          />
+        </div>
       </div>
     </div>
   );
