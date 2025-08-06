@@ -11,8 +11,9 @@ import { StockfishEval } from '@/app/chess/StockfishEval';
 
 
 interface PieceDropHandlerArgs {
+    piece: any;  // Using any for piece type since it's a complex type from react-chessboard
     sourceSquare: string;
-    targetSquare: string;
+    targetSquare: string | null;
 }
 
 export default function ChessPage(pgn?: string) {
@@ -26,11 +27,18 @@ export default function ChessPage(pgn?: string) {
     const [blackPlayer, setBlackPlayer] = useState({ name: "", rating: 100 });
 
     useEffect(() => {
-        if (!isValidPGN(pgnstring)) return;
+        // Reset the game first
+        chessGame.reset();
         
-        chessGame.reset()
-
-        if (pgnstring.trim()) {
+        // If the PGN string is empty, just set the initial position
+        if (!pgnstring.trim()) {
+            setFen([chessGame.fen()]);
+            setStep(0);
+            return;
+        }
+        
+        try {
+            // Attempt to load the PGN and log for debugging
             chessGame.loadPgn(pgnstring);
             
             // Extract player information from PGN headers
@@ -43,10 +51,25 @@ export default function ChessPage(pgn?: string) {
                 name: headers['Black'] || "",
                 rating: headers['BlackElo'] ? parseInt(headers['BlackElo']) : 0
             });
-        }
+        } catch (e) {
+            console.error('Error loading PGN:', e);
+            // Reset the game on error
+            chessGame.reset();
+            setFen([chessGame.fen()]);
+            setStep(0);
+            return;
+        }       
 
+        // Store the history first
+        const moveHistory = chessGame.history();
+        // Reset the game to start position
+        chessGame.reset();
+        
+        // Initialize FEN history with the starting position
         const historyFens = [chessGame.fen()];
-        chessGame.history().forEach(move => {
+        
+        // Replay each move on the fresh board
+        moveHistory.forEach(move => {
             chessGame.move(move);
             historyFens.push(chessGame.fen());
         });
@@ -59,11 +82,9 @@ export default function ChessPage(pgn?: string) {
         const onKey= (e: KeyboardEvent) => {
             if (e.key === 'ArrowLeft') {
                 setStep(i => Math.max(i - 1, 0));
-                console.log('left arrow pressed', 'step:', step);
             }
             if (e.key == 'ArrowRight') {
                 setStep(i => Math.min(i + 1, fens.length - 1));
-                console.log('right arrow pressed', 'step:', step);
             }
         }
         window.addEventListener('keydown', onKey);
@@ -88,9 +109,13 @@ export default function ChessPage(pgn?: string) {
     
     function onPieceDrop({
             sourceSquare, 
-            targetSquare 
+            targetSquare,
+            piece 
         }: PieceDropHandlerArgs) {
         try {
+            // Only process the move if we have a valid target square
+            if (!targetSquare) return false;
+            
             chessGame.move({
                 from: sourceSquare,
                 to: targetSquare,
@@ -105,7 +130,6 @@ export default function ChessPage(pgn?: string) {
 
             return true;
         } catch {
-
             return false;
         }
     }
