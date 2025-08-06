@@ -16,7 +16,11 @@ interface PieceDropHandlerArgs {
     targetSquare: string | null;
 }
 
-export default function ChessPage(pgn?: string) {
+interface ChessPageProps {
+    pgn?: string;
+}
+
+export default function ChessPage({ pgn }: ChessPageProps = {}) {
     const chessGameRef = useRef<Chess>(new Chess());
     const chessGame = chessGameRef.current;
 
