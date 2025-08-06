@@ -25,6 +25,7 @@ export default function ChessPage(pgn?: string) {
     const [pgnstring, setPGN] = useState<string>("");
     const [whitePlayer, setWhitePlayer] = useState({ name: "", rating: 100 });
     const [blackPlayer, setBlackPlayer] = useState({ name: "", rating: 100 });
+    const [isFlipped, setIsFlipped] = useState(false);
 
     useEffect(() => {
         // Reset the game first
@@ -147,17 +148,27 @@ export default function ChessPage(pgn?: string) {
         setStep(prev => prev + 1);
     }
 
-    const chessboardOptions = {
+    const chessboardOptions: { 
+        position: string;
+        onPieceDrop: ({ sourceSquare, targetSquare, piece }: PieceDropHandlerArgs) => boolean;
+        id: string;
+        boardOrientation: 'white' | 'black';
+    } = {
         position: fens[step],
         onPieceDrop,
         id: 'play-vs-random',
+        boardOrientation: isFlipped ? 'black' : 'white',
     };
 
     return (
         <div className="flex flex-row space-x-10 justify-center items-center">
 
             {/* stockfish component */}
-            <StockfishEval fen={fens[step]} />
+            <StockfishEval 
+                fen={fens[step]}
+                isFlipped={isFlipped}
+                onFlipBoard={() => setIsFlipped(!isFlipped)}
+            />
 
             <div className="flex flex-col items-center">
                 {chessGame.isCheckmate() && (

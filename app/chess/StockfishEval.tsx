@@ -21,6 +21,8 @@ interface StockfishEvalProps {
   depth?: number;
   className?: string;
   statusMessage?: string | null;
+  onFlipBoard?: () => void;
+  isFlipped?: boolean;
 }
 
 interface ApiError {
@@ -300,7 +302,7 @@ export function StockfishEval(props: StockfishEvalProps) {
       </div>
 
       {/* Controls Box */}
-      <div className="mt-3 bg-gradient-to-br from-gray-600 to-gray-500 rounded-xl p-4 border border-gray-400 shadow-lg">
+      <div className="mt-3 bg-gradient-to-br from-gray-600 to-gray-500 rounded-xl p-4 border border-gray-400 shadow-lg space-y-4">
         <div className="flex items-center justify-between">
           <label htmlFor="eval-bar-toggle" className="text-gray-300 text-sm font-medium">
             Hide Evaluation
@@ -310,6 +312,17 @@ export function StockfishEval(props: StockfishEvalProps) {
             checked={hideEval}
             onCheckedChange={setHideEval}
           />
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-gray-300 text-sm font-medium">
+            Flip Board
+          </span>
+          <button 
+            onClick={() => props.onFlipBoard?.()}
+            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition-colors"
+          >
+            {props.isFlipped ? '↓' : '↑'}
+          </button>
         </div>
       </div>
     </div>
