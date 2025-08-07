@@ -21,10 +21,27 @@ export const useStockfish = () => {
 
   useEffect(() => {
     const initializeEngine = async () => {
-      if (typeof window !== 'undefined' && window.Stockfish) {
-        // Load Stockfish WASM
-        const worker = new window.Stockfish();
-        setEngine(worker);
+      if (typeof window !== 'undefined') {
+        try {
+          // Wait for Stockfish to be loaded
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          if (!window.Stockfish) {
+            console.error('Stockfish not loaded');
+            return;
+          }
+
+          // Initialize Stockfish WASM
+          const worker = new window.Stockfish();
+          
+          // Wait for engine to be ready
+          worker.postMessage('uci');
+          worker.postMessage('isready');
+          
+          setEngine(worker);
+        } catch (error) {
+          console.error('Error initializing Stockfish:', error);
+        }
       }
     };
 

@@ -31,6 +31,10 @@ export default function RootLayout({
           src="/stockfish.wasm/stockfish.js"
           strategy="beforeInteractive"
         />
+        <Script 
+          src="/stockfish.wasm/stockfish.worker.js"
+          strategy="beforeInteractive"
+        />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
         {children}
