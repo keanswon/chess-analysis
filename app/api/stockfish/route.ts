@@ -1,5 +1,3 @@
-// app/api/stockfish/route.ts (or pages/api/stockfish.ts for Pages Router)
-import { spawn, ChildProcess } from 'child_process';
 import { NextRequest, NextResponse } from 'next/server';
 
 interface StockfishEvaluation {
@@ -9,8 +7,8 @@ interface StockfishEvaluation {
   depth: number;
   nodes: number;
   time: number;
-  nps?: number; // nodes per second
-  fen?: string; // side to move for evaluation perspective
+  nps?: number;
+  fen?: string;
 }
 
 interface EvaluationRequest {
@@ -21,6 +19,44 @@ interface EvaluationRequest {
 
 interface ApiError {
   error: string;
+}
+
+// Configure for Edge Runtime
+export const runtime = 'edge';
+
+let stockfishInstance: Worker | null = null;
+
+async function initStockfish(): Promise<Worker> {
+  if (stockfishInstance) return stockfishInstance;
+  
+  // Load Stockfish WASM
+  const wasmPath = '/stockfish.wasm/stockfish.js';
+  const wasmCode = await fetch(new URL(wasmPath, 'https://' + process.env.VERCEL_URL)).then(res => res.text());
+  
+  // Create a worker with the WASM code
+  const workerCode = `
+    ${wasmCode}
+    self.onmessage = (e) => {
+      if (e.data === 'init') {
+        self.postMessage('ready');
+      } else {
+        self.postMessage(e.data);
+      }
+    };
+  `;
+  
+  const blob = new Blob([workerCode], { type: 'application/javascript' });
+  const workerUrl = URL.createObjectURL(blob);
+  const worker = new Worker(workerUrl);
+  
+  // Wait for worker to be ready
+  await new Promise<void>((resolve) => {
+    worker.onmessage = () => resolve();
+    worker.postMessage('init');
+  });
+  
+  stockfishInstance = worker;
+  return worker;
 }
 
 
@@ -59,104 +95,79 @@ async function evaluatePositionStream(
   timeLimit: number,
   controller: ReadableStreamDefaultController
 ) {
-  const stockfishPath = process.platform === 'darwin'
-    ? '/opt/homebrew/bin/stockfish'
-    : process.platform === 'win32'
-    ? 'stockfish.exe'
-    : '/usr/local/bin/stockfish';
-
-  let stockfish: ChildProcess;
+  let stockfish: Worker;
   try {
-    stockfish = spawn(stockfishPath, [], {
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+    stockfish = await initStockfish();
   } catch (error) {
     controller.enqueue(JSON.stringify({ error: `Failed to start Stockfish: ${error}` }) + '\n');
     controller.close();
     return;
   }
 
-  let output = '';
   let lastDepth = 0;
   let finished = false;
-  // Always keep the latest info line's evaluation
-  const result: StockfishEvaluation & { fen?: string } = {
+  const result: StockfishEvaluation = {
     evaluation: null,
     bestMove: '',
     principalVariation: [],
     depth: 0,
     nodes: 0,
     time: 0,
-    fen // add fen to result for perspective correction
+    fen
   };
 
   const timeout = setTimeout(() => {
     if (!finished) {
-      stockfish.kill('SIGTERM');
+      stockfish.terminate();
       controller.enqueue(JSON.stringify({ error: 'Stockfish evaluation timeout' }) + '\n');
       controller.close();
     }
   }, timeLimit);
 
-  stockfish.stdout?.on('data', (data: Buffer) => {
-    output += data.toString();
-    const lines = output.split('\n');
-    output = lines.pop() || '';
-    for (const line of lines) {
-      if (line.startsWith('info') && line.includes('depth')) {
-        // Always update the result object with the latest info
-        parseInfoLine(line, result);
-        // Only send new depth updates
-        if (result.depth > lastDepth) {
-          lastDepth = result.depth;
-          controller.enqueue(JSON.stringify({ type: 'info', ...result }) + '\n');
-        }
-      }
-      if (line.startsWith('bestmove')) {
-        const match = line.match(/bestmove (\w+)/);
-        if (match) {
-          result.bestMove = match[1];
-        }
-        if (result.time > 0) {
-          result.nps = Math.round(result.nodes / (result.time / 1000));
-        }
-        finished = true;
-        clearTimeout(timeout);
-        controller.enqueue(JSON.stringify({ type: 'done', ...result }) + '\n');
-        controller.close();
-        stockfish.kill('SIGTERM');
-        return;
+  // Set up message handler
+  stockfish.onmessage = (event) => {
+    const line = event.data;
+    
+    if (line.startsWith('info') && line.includes('depth')) {
+      parseInfoLine(line, result);
+      if (result.depth > lastDepth) {
+        lastDepth = result.depth;
+        controller.enqueue(JSON.stringify({ type: 'info', ...result }) + '\n');
       }
     }
-  });
-
-  stockfish.stderr?.on('data', (data: Buffer) => {
-    console.error('Stockfish stderr:', data.toString());
-  });
-
-  stockfish.on('error', (error: Error) => {
-    clearTimeout(timeout);
-    controller.enqueue(JSON.stringify({ error: `Stockfish process error: ${error.message}` }) + '\n');
-    controller.close();
-  });
-
-  stockfish.on('close', (code: number | null) => {
-    clearTimeout(timeout);
-    if (!finished && code !== 0 && code !== null) {
-      controller.enqueue(JSON.stringify({ error: `Stockfish exited with code ${code}` }) + '\n');
+    
+    if (line.startsWith('bestmove')) {
+      const match = line.match(/bestmove (\w+)/);
+      if (match) {
+        result.bestMove = match[1];
+      }
+      if (result.time > 0) {
+        result.nps = Math.round(result.nodes / (result.time / 1000));
+      }
+      finished = true;
+      clearTimeout(timeout);
+      controller.enqueue(JSON.stringify({ type: 'done', ...result }) + '\n');
       controller.close();
+      stockfish.terminate();
     }
-  });
+  };
+
+  stockfish.onerror = (error) => {
+    clearTimeout(timeout);
+    controller.enqueue(JSON.stringify({ error: `Stockfish error: ${error.message}` }) + '\n');
+    controller.close();
+    stockfish.terminate();
+  };
 
   // Send UCI commands
   try {
-    stockfish.stdin?.write('uci\n');
-    stockfish.stdin?.write('isready\n');
-    stockfish.stdin?.write(`position fen ${fen}\n`);
-    stockfish.stdin?.write(`go depth ${depth}\n`);
+    stockfish.postMessage('uci');
+    stockfish.postMessage('isready');
+    stockfish.postMessage(`position fen ${fen}`);
+    stockfish.postMessage(`go depth ${depth}`);
   } catch (error) {
     clearTimeout(timeout);
-    stockfish.kill('SIGTERM');
+    stockfish.terminate();
     controller.enqueue(JSON.stringify({ error: 'Failed to communicate with Stockfish' }) + '\n');
     controller.close();
   }
