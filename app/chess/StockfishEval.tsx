@@ -4,6 +4,8 @@
 import { useState, useEffect } from 'react';
 import { Chess } from 'chess.js';
 import { Switch } from "@/components/ui/switch";
+import { useStockfish } from '@/lib/useStockfish';
+import Script from 'next/script';
 
 interface StockfishEvaluation {
   evaluation: number | string | null;
